@@ -137,7 +137,7 @@ def plot_arima_sarima_results(y_test, y_pred_arima, y_pred_sarima):
 
 
 # Main execution
-df = pd.read_csv('rainfall_data.csv')
+df = pd.read_csv('rainfall/Rainfall_data.csv')
 df = create_season_dummies(df)
 df = create_adatimeobjhect(df)
 df = reorder_columns(df, target_col='Precipitation')
