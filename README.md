@@ -6,3 +6,20 @@
 
 
 ###The second dataset "rainfall" is collected from mumbai/india. seasons should be considered according to the monsoon season {june-september} 
+
+---
+
+## Solar Irradiance Forecasting Analysis
+
+### Overview
+Comprehensive analysis and forecasting of solar Global Horizontal Irradiance (GHI) using meteorological data. This project demonstrates; preprocessing to predictive modeling.
+
+### Schema
+
+```
+Project: Solar Irradiance Forecasting
+├── Implementation: solar/solar.py
+└── Results: images/solar/
+```
+
+
