@@ -1,0 +1,1052 @@
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import seaborn as sns
+from statsmodels.tsa.stattools import adfuller
+from statsmodels.tsa.arima.model import ARIMA
+from statsmodels.tsa.statespace.sarimax import SARIMAX
+import warnings
+warnings.filterwarnings('ignore')
+
+def load_data(filepath):
+    """Load solar data from CSV file."""
+    df = pd.read_csv(filepath, skiprows=2)
+    return df
+
+def preprocess_data(df):
+    """Preprocess solar data: create DateTime index and handle Fill Flag."""
+    df['DateTime'] = pd.to_datetime(df[['Year', 'Month', 'Day', 'Hour', 'Minute']], errors='coerce')
+    return df
+
+def filter_ghi_data(df, threshold=5):
+    """Filter rows where GHI >= threshold and reset index."""
+    initial_rows = len(df)
+    df = df[df['GHI'] >= threshold].copy()
+    df.reset_index(drop=True, inplace=True)
+    filtered_rows = len(df)
+    print(f"Filtered {initial_rows - filtered_rows} rows where GHI < {threshold}")
+    print(f"Remaining rows: {filtered_rows}")
+    return df
+
+def add_season_column(df):
+    """Add a season column based on month."""
+    def get_season(month):
+        if month in [12, 1, 2]:
+            return 'Winter'
+        elif month in [3, 4, 5]:
+            return 'Spring'
+        elif month in [6, 7, 8]:
+            return 'Summer'
+        elif month in [9, 10, 11]:
+            return 'Fall'
+        else:
+            return 'Unknown'
+    
+    df['Season'] = df['Month'].apply(get_season)
+    
+    print("\nSeason distribution:")
+    print(df['Season'].value_counts().sort_index())
+    
+    return df
+
+def plot_ghi_distribution_by_season(df, save_path='./resultpngs/ghi_distribution_by_season.png'):
+    """Create and save histograms of GHI distribution for each season."""
+    seasons = ['Winter', 'Spring', 'Summer', 'Fall']
+    fig, axes = plt.subplots(2, 2, figsize=(14, 10))
+    axes = axes.flatten()
+    
+    for idx, season in enumerate(seasons):
+        season_data = df[df['Season'] == season]['GHI']
+        
+        if len(season_data) > 0:
+            axes[idx].hist(season_data, bins=30, color='skyblue', edgecolor='black', alpha=0.7)
+            axes[idx].set_xlabel('GHI (W/m²)', fontsize=10)
+            axes[idx].set_ylabel('Frequency', fontsize=10)
+            axes[idx].set_title(f'{season} - GHI Distribution', fontsize=12, fontweight='bold')
+            axes[idx].grid(axis='y', alpha=0.3)
+            
+            # Add statistics
+            mean_val = season_data.mean()
+            median_val = season_data.median()
+            axes[idx].axvline(mean_val, color='red', linestyle='--', linewidth=2, label=f'Mean: {mean_val:.2f}')
+            axes[idx].axvline(median_val, color='green', linestyle='--', linewidth=2, label=f'Median: {median_val:.2f}')
+            axes[idx].legend(fontsize=8)
+    
+    plt.suptitle('GHI Distribution by Season', fontsize=16, fontweight='bold', y=0.995)
+    plt.tight_layout()
+    plt.savefig(save_path, dpi=300, bbox_inches='tight')
+    plt.show()
+    
+    print("\nGHI Statistics by Season:")
+    for season in seasons:
+        season_data = df[df['Season'] == season]['GHI']
+        if len(season_data) > 0:
+            print(f"\n{season}:")
+            print(f"  Count: {len(season_data)}")
+            print(f"  Mean: {season_data.mean():.2f}")
+            print(f"  Median: {season_data.median():.2f}")
+            print(f"  Std Dev: {season_data.std():.2f}")
+            print(f"  Min: {season_data.min():.2f}")
+            print(f"  Max: {season_data.max():.2f}")
+
+def plot_ghi_boxplot_by_season(df, save_path='./resultpngs/ghi_boxplot_by_season.png'):
+    """Create and save box plot of GHI by season."""
+    plt.figure(figsize=(12, 6))
+    
+    # Create box plot
+    seasons_order = ['Winter', 'Spring', 'Summer', 'Fall']
+    ax = sns.boxplot(data=df, x='Season', y='GHI', order=seasons_order, palette='Set2')
+    
+    plt.xlabel('Season', fontsize=12, fontweight='bold')
+    plt.ylabel('GHI (W/m^2)', fontsize=12, fontweight='bold')
+    plt.title('GHI Distribution by Season (Box Plot)', fontsize=14, fontweight='bold', pad=15)
+    plt.grid(axis='y', alpha=0.3)
+
+    # Annotate quartile stats on the plot
+    y_max = df['GHI'].max() if len(df) > 0 else 0
+    y_offset = max(y_max * 0.02, 1)
+    for i, season in enumerate(seasons_order):
+        season_data = df[df['Season'] == season]['GHI']
+        if len(season_data) > 0:
+            q1 = season_data.quantile(0.25)
+            q2 = season_data.quantile(0.50)
+            q3 = season_data.quantile(0.75)
+            iqr = q3 - q1
+            label = f"Q1:{q1:.1f}\nQ2:{q2:.1f}\nQ3:{q3:.1f}\nIQR:{iqr:.1f}"
+            ax.text(i, q3 + y_offset, label, ha='center', va='bottom', fontsize=8, color='black')
+    
+    plt.tight_layout()
+    plt.savefig(save_path, dpi=300, bbox_inches='tight')
+    plt.show()
+    
+    print("\nBox Plot Statistics:")
+    for season in seasons_order:
+        season_data = df[df['Season'] == season]['GHI']
+        if len(season_data) > 0:
+            q1 = season_data.quantile(0.25)
+            q2 = season_data.quantile(0.50)
+            q3 = season_data.quantile(0.75)
+            iqr = q3 - q1
+            print(f"\n{season}:")
+            print(f"  Q1 (25%): {q1:.2f}")
+            print(f"  Q2 (Median): {q2:.2f}")
+            print(f"  Q3 (75%): {q3:.2f}")
+            print(f"  IQR: {iqr:.2f}")
+
+def plot_temperature_vs_ghi(df, save_path='./resultpngs/temperature_vs_ghi.png'):
+    """Create scatter plot of Temperature vs GHI and analyze their relationship."""
+    required_cols = {'Temperature', 'GHI'}
+    missing_cols = required_cols - set(df.columns)
+    if missing_cols:
+        print(f"Skipping Temperature vs GHI plot. Missing columns: {sorted(missing_cols)}")
+        return
+
+    valid_mask = df['Temperature'].notna() & df['GHI'].notna()
+    if valid_mask.sum() < 2:
+        print("Skipping Temperature vs GHI plot. Not enough valid data points.")
+        return
+
+    temp_vals = df.loc[valid_mask, 'Temperature']
+    ghi_vals = df.loc[valid_mask, 'GHI']
+
+    # Create figure with two subplots
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(16, 6))
+
+    # Scatter plot
+    ax1.scatter(temp_vals, ghi_vals, alpha=0.3, s=10, c='steelblue', edgecolor='none')
+    ax1.set_xlabel('Temperature (deg C)', fontsize=12, fontweight='bold')
+    ax1.set_ylabel('GHI (W/m^2)', fontsize=12, fontweight='bold')
+    ax1.set_title('Temperature vs GHI Relationship', fontsize=14, fontweight='bold', pad=15)
+    ax1.grid(alpha=0.3)
+
+    # Add trend line
+    z = np.polyfit(temp_vals, ghi_vals, 1)
+    p = np.poly1d(z)
+    temp_sorted = np.sort(temp_vals)
+    ax1.plot(temp_sorted, p(temp_sorted), "r--", linewidth=2, label=f'Trend: y={z[0]:.2f}x+{z[1]:.2f}')
+    ax1.legend()
+
+    # Scatter plot colored by season (if available)
+    seasons_order = ['Winter', 'Spring', 'Summer', 'Fall']
+    colors = {'Winter': 'blue', 'Spring': 'green', 'Summer': 'red', 'Fall': 'orange'}
+    if 'Season' in df.columns:
+        for season in seasons_order:
+            season_data = df[df['Season'] == season]
+            ax2.scatter(season_data['Temperature'], season_data['GHI'],
+                        alpha=0.4, s=15, c=colors[season], label=season, edgecolor='none')
+        ax2.legend()
+    else:
+        ax2.scatter(temp_vals, ghi_vals, alpha=0.3, s=10, c='steelblue', edgecolor='none')
+
+    ax2.set_xlabel('Temperature (deg C)', fontsize=12, fontweight='bold')
+    ax2.set_ylabel('GHI (W/m^2)', fontsize=12, fontweight='bold')
+    ax2.set_title('Temperature vs GHI by Season', fontsize=14, fontweight='bold', pad=15)
+    ax2.grid(alpha=0.3)
+
+    plt.tight_layout()
+    plt.savefig(save_path, dpi=300, bbox_inches='tight')
+    plt.show()
+
+    # Calculate correlation
+    correlation = temp_vals.corr(ghi_vals)
+
+    print("\n" + "=" * 80)
+    print("TEMPERATURE vs GHI RELATIONSHIP ANALYSIS")
+    print("=" * 80)
+    print(f"\nPearson Correlation Coefficient: {correlation:.4f}")
+
+    # Interpret correlation
+    if correlation > 0.7:
+        strength = "strong positive"
+    elif correlation > 0.4:
+        strength = "moderate positive"
+    elif correlation > 0.2:
+        strength = "weak positive"
+    elif correlation > -0.2:
+        strength = "very weak or no"
+    elif correlation > -0.4:
+        strength = "weak negative"
+    elif correlation > -0.7:
+        strength = "moderate negative"
+    else:
+        strength = "strong negative"
+
+    print(f"Correlation Strength: {strength.upper()}")
+
+    print("\nINTERPRETATION:")
+    print("-" * 80)
+
+    if correlation > 0.4:
+        print("OK: POSITIVE correlation between Temperature and GHI.")
+        print("OK: As GHI increases, temperature tends to increase.")
+        print("OK: This is expected (more sunlight -> more heating).")
+        print("\nKey Insights:")
+        print("  - Higher GHI values align with warmer temperatures")
+        print("  - Solar radiation is a primary driver of surface temperature")
+        print("  - The relationship varies by season (see seasonal plot)")
+        print("  - Maximum GHI occurs during summer with highest temperatures")
+    elif correlation < -0.2:
+        print("OK: NEGATIVE correlation between Temperature and GHI.")
+        print("OK: This is unusual and may indicate:")
+        print("  - Cloud cover reducing GHI while trapping heat")
+        print("  - Time of day effects (evening warmth vs. decreasing sunlight)")
+    else:
+        print("OK: WEAK or NO linear correlation between Temperature and GHI.")
+        print("OK: This may be due to:")
+        print("  - Other factors affecting temperature (wind, humidity, time lag)")
+        print("  - Thermal inertia (temperature responds slowly to radiation changes)")
+
+    # Seasonal analysis
+    if 'Season' in df.columns:
+        print("\n" + "-" * 80)
+        print("SEASONAL CORRELATION ANALYSIS:")
+        print("-" * 80)
+        for season in seasons_order:
+            season_data = df[df['Season'] == season]
+            if len(season_data) > 0:
+                season_corr = season_data['Temperature'].corr(season_data['GHI'])
+                print(f"{season:8s}: Correlation = {season_corr:.4f}")
+
+    print("=" * 80 + "\n")
+
+def plot_ghi_distribution(df, save_path='./resultpngs/ghi_distribution_after_filtering_zeros.png'):
+    """Create and save histogram of GHI distribution."""
+    plt.figure(figsize=(10, 6))
+    plt.hist(df['GHI'], bins=50, color='skyblue', edgecolor='black', alpha=0.7)
+    plt.xlabel('GHI (W/m²)', fontsize=12)
+    plt.ylabel('Frequency', fontsize=12)
+    plt.title('Distribution of Global Horizontal Irradiance (GHI) after filtering out zero values', fontsize=14, pad=15)
+    plt.grid(axis='y', alpha=0.3)
+    
+    # Add statistics to the plot
+    mean_val = df['GHI'].mean()
+    median_val = df['GHI'].median()
+    plt.axvline(mean_val, color='red', linestyle='--', linewidth=2, label=f'Mean: {mean_val:.2f}')
+    plt.axvline(median_val, color='green', linestyle='--', linewidth=2, label=f'Median: {median_val:.2f}')
+    plt.legend()
+    
+    plt.tight_layout()
+    plt.savefig(save_path, dpi=300, bbox_inches='tight')
+    plt.show()
+    
+    print(f"\nGHI Distribution Statistics:")
+    print(f"  Mean: {mean_val:.2f}")
+    print(f"  Median: {median_val:.2f}")
+    print(f"  Std Dev: {df['GHI'].std():.2f}")
+    print(f"  Min: {df['GHI'].min():.2f}")
+    print(f"  Max: {df['GHI'].max():.2f}")
+
+def create_correlation_heatmap(df, save_path='./resultpngs/correlation_heatmap.png'):
+    """Create and save correlation heatmap for numeric features."""
+    numeric_df = df.drop(columns=['Fill Flag','Year', 'Month', 'Day', 'Hour', 'Minute'], errors='ignore')
+    numeric_df = numeric_df.select_dtypes(include=[np.number])
+    
+    correlation_matrix = numeric_df.corr()
+    
+    plt.figure(figsize=(12, 10))
+    sns.heatmap(correlation_matrix, annot=True, fmt='.2f', cmap='coolwarm', 
+                center=0, square=True, linewidths=1, cbar_kws={"shrink": 0.8})
+    plt.title('Correlation Heatmap of Solar Data Features', fontsize=16, pad=20)
+    plt.tight_layout()
+    plt.savefig(save_path, dpi=300, bbox_inches='tight')
+    plt.show()
+    
+    print(correlation_matrix)
+    return correlation_matrix
+
+# def normalize_data(df):
+#     """Apply normalization methods to GHI column."""
+#     df['GHI_MinMax'] = (df['GHI'] - df['GHI'].min()) / (df['GHI'].max() - df['GHI'].min())
+#     df['GHI_ZScore'] = (df['GHI'] - df['GHI'].mean()) / df['GHI'].std()
+#     return df
+
+def perform_adf_test(series, name):
+    """Perform Augmented Dickey-Fuller test for stationarity."""
+    result = adfuller(series.dropna())
+    print(f"\n{name} - Augmented Dickey-Fuller Test Results:")
+    print(f"  ADF Statistic: {result[0]:.6f}")
+    print(f"  p-value: {result[1]:.6f}")
+    print(f"  Critical Values:")
+    for key, value in result[4].items():
+        print(f"    {key}: {value:.3f}")
+    
+    if result[1] < 0.05:
+        print(f"  >>> Result: STATIONARY (p-value < 0.05)")
+    else:
+        print(f"  >>> Result: NON-STATIONARY (p-value >= 0.05)")
+    
+    return {
+        'Column': name,
+        'ADF Statistic': result[0],
+        'p-value': result[1],
+        'Stationary': 'Yes' if result[1] < 0.05 else 'No'
+    }
+
+def create_arima_dataframe(df):
+    
+    # Select required columns
+    required_cols = ['DateTime', 'Temperature', 'GHI']
+    
+    # Check if all required columns exist
+    missing_cols = [col for col in required_cols if col not in df.columns]
+    if missing_cols:
+        print(f"WARNING: Missing columns: {missing_cols}")
+        print("Available columns:", df.columns.tolist())
+        return None
+    
+    # Create new dataframe with selected attributes
+    df_arima = df[required_cols].copy()
+    
+    # Remove rows with missing values
+    initial_rows = len(df_arima)
+    df_arima = df_arima.dropna()
+    removed_rows = initial_rows - len(df_arima)
+    
+    # Sort by DateTime
+    df_arima = df_arima.sort_values('DateTime').reset_index(drop=True)
+    
+    # Print summary
+    print("\n" + "="*80)
+    print("ARIMA TRAINING DATAFRAME CREATED")
+    print("="*80)
+    print(f"Total rows: {len(df_arima)}")
+    print(f"Rows removed (missing values): {removed_rows}")
+    print(f"\nDataframe shape: {df_arima.shape}")
+    print(f"\nDataframe information:")
+    print(df_arima.info())
+    print(f"\nFirst 5 rows:")
+    print(df_arima.head())
+    print(f"\nLast 5 rows:")
+    print(df_arima.tail())
+    print(f"\nStatistical Summary:")
+    print(df_arima.describe())
+    print("="*80 + "\n")
+    
+    return df_arima
+
+def plot_timeseries_with_seasonality(df, save_path='./resultpngs/timeseries_seasonality.png'):
+    """Create a time-series plot showing seasonality of GHI data."""
+    # Sort by DateTime to ensure proper time-series ordering
+    df_sorted = df.sort_values('DateTime').reset_index(drop=True)
+    
+    # Create figure with multiple subplots
+    fig, axes = plt.subplots(2, 1, figsize=(16, 10))
+    
+    # Plot 1: Full time-series with season coloring
+    seasons_order = ['Winter', 'Spring', 'Summer', 'Fall']
+    colors = {'Winter': '#1f77b4', 'Spring': '#2ca02c', 'Summer': '#ff7f0e', 'Fall': '#d62728'}
+    
+    for season in seasons_order:
+        season_data = df_sorted[df_sorted['Season'] == season]
+        axes[0].scatter(season_data['DateTime'], season_data['GHI'], 
+                       alpha=0.4, s=5, c=colors[season], label=season, edgecolor='none')
+    
+    axes[0].set_xlabel('DateTime', fontsize=12, fontweight='bold')
+    axes[0].set_ylabel('GHI (W/m²)', fontsize=12, fontweight='bold')
+    axes[0].set_title('Time-Series of Solar Irradiance (GHI) with Seasonal Coloring', 
+                     fontsize=14, fontweight='bold', pad=15)
+    axes[0].legend(loc='upper right', fontsize=11)
+    axes[0].grid(True, alpha=0.3, linestyle='--')
+    plt.setp(axes[0].xaxis.get_majorticklabels(), rotation=45, ha='right')
+    
+    # Plot 2: Daily average GHI with seasonality (to see cleaner pattern)
+    daily_avg = df_sorted.groupby(df_sorted['DateTime'].dt.date).agg({'GHI': 'mean'}).reset_index()
+    daily_avg.columns = ['Date', 'Mean_GHI']
+    daily_avg['Date'] = pd.to_datetime(daily_avg['Date'])
+    
+    # Add season column to daily data
+    daily_avg['Month'] = daily_avg['Date'].dt.month
+    daily_avg['Season'] = daily_avg['Month'].apply(lambda m: 
+        'Winter' if m in [12, 1, 2] else
+        'Spring' if m in [3, 4, 5] else
+        'Summer' if m in [6, 7, 8] else 'Fall')
+    
+    for season in seasons_order:
+        season_daily = daily_avg[daily_avg['Season'] == season]
+        axes[1].plot(season_daily['Date'], season_daily['Mean_GHI'], 
+                    marker='o', markersize=4, linewidth=1.5, color=colors[season], 
+                    label=season, alpha=0.8)
+    
+    axes[1].set_xlabel('DateTime', fontsize=12, fontweight='bold')
+    axes[1].set_ylabel('Daily Average GHI (W/m²)', fontsize=12, fontweight='bold')
+    axes[1].set_title('Daily Average Trend - Seasonal Patterns Visualization', 
+                     fontsize=14, fontweight='bold', pad=15)
+    axes[1].legend(loc='upper right', fontsize=11)
+    axes[1].grid(True, alpha=0.3, linestyle='--')
+    plt.setp(axes[1].xaxis.get_majorticklabels(), rotation=45, ha='right')
+    
+    plt.tight_layout()
+    plt.savefig(save_path, dpi=300, bbox_inches='tight')
+    plt.show()
+    
+    # Print seasonality statistics
+    print("\n" + "="*80)
+    print("TIME-SERIES SEASONALITY ANALYSIS")
+    print("="*80)
+    
+    print("\nSeasonal GHI Statistics:")
+    print("-"*80)
+    for season in seasons_order:
+        season_data = df_sorted[df_sorted['Season'] == season]['GHI']
+        print(f"\n{season}:")
+        print(f"  Mean GHI: {season_data.mean():.2f} W/m²")
+        print(f"  Median GHI: {season_data.median():.2f} W/m²")
+        print(f"  Std Dev: {season_data.std():.2f} W/m²")
+        print(f"  Min: {season_data.min():.2f} W/m²")
+        print(f"  Max: {season_data.max():.2f} W/m²")
+        print(f"  Total Data Points: {len(season_data)}")
+    
+    # Calculate seasonal pattern strength
+    overall_mean = df_sorted['GHI'].mean()
+    seasonal_means = [df_sorted[df_sorted['Season'] == s]['GHI'].mean() for s in seasons_order]
+    seasonal_variance = np.var(seasonal_means)
+    
+    print("\n" + "-"*80)
+    print("Seasonality Strength:")
+    print(f"  Overall Mean GHI: {overall_mean:.2f} W/m²")
+    print(f"  Seasonal Variance: {seasonal_variance:.2f}")
+    print(f"  Seasonal Range: {max(seasonal_means) - min(seasonal_means):.2f} W/m²")
+    print(f"  Peak Season: {seasons_order[np.argmax(seasonal_means)]} ({max(seasonal_means):.2f} W/m²)")
+    print(f"  Lowest Season: {seasons_order[np.argmin(seasonal_means)]} ({min(seasonal_means):.2f} W/m²)")
+    
+    print("="*80 + "\n")
+    
+    return daily_avg
+
+def train_arima_model(df_arima, order=(1, 0, 0), target_col='GHI'):
+    """
+    Train an ARIMA model on the provided dataframe.
+    
+    Parameters:
+    -----------
+    df_arima : pd.DataFrame
+        Dataframe with DateTime and target column (GHI)
+    order : tuple
+        ARIMA order (p, d, q) - defaults to (1, 0, 1)
+    target_col : str
+        Name of the column to forecast (default: 'GHI')
+    
+    Returns:
+    --------
+    model : ARIMA fitted model
+    results : ARIMA fit results object
+    """
+    
+    if df_arima is None or len(df_arima) == 0:
+        print("ERROR: Invalid dataframe for ARIMA training")
+        return None, None
+    
+    print("\n" + "="*80)
+    print(f"ARIMA MODEL TRAINING - Order {order}")
+    print("="*80)
+    print(f"Target column: {target_col}")
+    print(f"Number of observations: {len(df_arima)}")
+    print(f"Date range: {df_arima['DateTime'].min()} to {df_arima['DateTime'].max()}")
+    
+    # Train ARIMA model
+    try:
+        arima_model = ARIMA(df_arima[target_col], order=order)
+        arima_results = arima_model.fit()
+        
+        print("\n" + "-"*80)
+        print("ARIMA Model Summary:")
+        print("-"*80)
+        print(arima_results.summary())
+        print("-"*80)
+        
+        # Print key metrics
+        print(f"\nAIC: {arima_results.aic:.2f}")
+        print(f"BIC: {arima_results.bic:.2f}")
+        print(f"RMSE: {np.sqrt(arima_results.mse):.4f}")
+        
+        print("="*80 + "\n")
+        
+        return arima_model, arima_results
+        
+    except Exception as e:
+        print(f"ERROR training ARIMA model: {str(e)}")
+        return None, None
+
+def train_sarima_model(df_arima, order=(1, 0, 1), seasonal_order=(1, 0, 1, 9), target_col='GHI'):
+    """
+    Train a SARIMA model on the provided dataframe.
+    
+    Parameters:
+    -----------
+    df_arima : pd.DataFrame
+        Dataframe with DateTime and target column (GHI)
+    order : tuple
+        ARIMA order (p, d, q) - defaults to (1, 0, 1)
+    seasonal_order : tuple
+        Seasonal order (P, D, Q, s) - defaults to (1, 0 , 1, 9) for hourly data
+    target_col : str
+        Name of the column to forecast (default: 'GHI')
+    
+    Returns:
+    --------
+    model : SARIMAX fitted model
+    results : SARIMAX fit results object
+    """
+    
+    if df_arima is None or len(df_arima) == 0:
+        print("ERROR: Invalid dataframe for SARIMA training")
+        return None, None
+    
+    print("\n" + "="*80)
+    print(f"SARIMA MODEL TRAINING - Order {order} x seasonal {seasonal_order}")
+    print("="*80)
+    print(f"Target column: {target_col}")
+    print(f"Number of observations: {len(df_arima)}")
+    print(f"Date range: {df_arima['DateTime'].min()} to {df_arima['DateTime'].max()}")
+    print(f"Seasonal period: {seasonal_order[3]} hours")
+    
+    # Train SARIMA model
+    try:
+        sarima_model = SARIMAX(df_arima[target_col], 
+                               order=order, 
+                               seasonal_order=seasonal_order,
+                               enforce_stationarity=False,
+                               enforce_invertibility=False)
+        sarima_results = sarima_model.fit(disp=False)
+        
+        print("\n" + "-"*80)
+        print("SARIMA Model Summary:")
+        print("-"*80)
+        print(sarima_results.summary())
+        print("-"*80)
+        
+        # Print key metrics
+        print(f"\nAIC: {sarima_results.aic:.2f}")
+        print(f"BIC: {sarima_results.bic:.2f}")
+        print(f"RMSE: {np.sqrt(sarima_results.mse):.4f}")
+        
+        print("="*80 + "\n")
+        
+        return sarima_model, sarima_results
+        
+    except Exception as e:
+        print(f"ERROR training SARIMA model: {str(e)}")
+        return None, None
+
+def compare_arima_sarima(arima_results, sarima_results):
+    """
+    Compare ARIMA and SARIMA models based on key metrics.
+    
+    Parameters:
+    -----------
+    arima_results : ARIMA fit results
+        Fitted ARIMA model results
+    sarima_results : SARIMAX fit results
+        Fitted SARIMA model results
+    """
+    
+    if arima_results is None or sarima_results is None:
+        print("ERROR: One or both models are None. Cannot compare.")
+        return
+    
+    print("\n" + "="*80)
+    print("MODEL COMPARISON - ARIMA vs SARIMA")
+    print("="*80)
+    
+    comparison_dict = {
+        'Model': ['ARIMA', 'SARIMA'],
+        'AIC': [arima_results.aic, sarima_results.aic],
+        'BIC': [arima_results.bic, sarima_results.bic],
+        'RMSE': [np.sqrt(arima_results.mse), np.sqrt(sarima_results.mse)],
+        'Log-Likelihood': [arima_results.llf, sarima_results.llf]
+    }
+    
+    comparison_df = pd.DataFrame(comparison_dict)
+    print("\n" + comparison_df.to_string(index=False))
+    
+    # Determine better model
+    print("\n" + "-"*80)
+    print("Analysis:")
+    if arima_results.aic < sarima_results.aic:
+        print("✓ ARIMA has lower AIC (better fit)")
+    else:
+        print("✓ SARIMA has lower AIC (better fit)")
+    
+    if arima_results.bic < sarima_results.bic:
+        print("✓ ARIMA has lower BIC (better parsimonious fit)")
+    else:
+        print("✓ SARIMA has lower BIC (better parsimonious fit)")
+    
+    arima_rmse = np.sqrt(arima_results.mse)
+    sarima_rmse = np.sqrt(sarima_results.mse)
+    if arima_rmse < sarima_rmse:
+        print(f"✓ ARIMA has lower RMSE ({arima_rmse:.4f} vs {sarima_rmse:.4f})")
+    else:
+        print(f"✓ SARIMA has lower RMSE ({sarima_rmse:.4f} vs {arima_rmse:.4f})")
+    
+    print("="*80 + "\n")
+
+def plot_actual_vs_prediction(arima_results, sarima_results, df_arima, save_path='./resultpngs/actual_vs_prediction.png'):
+    """
+    Create scatter plots of actual data vs model predictions.
+    
+    Parameters:
+    -----------
+    arima_results : ARIMA fit results
+        Fitted ARIMA model results
+    sarima_results : SARIMAX fit results
+        Fitted SARIMA model results
+    df_arima : pd.DataFrame
+        Original dataframe with actual values
+    save_path : str
+        Path to save the plot
+    """
+    
+    if arima_results is None or sarima_results is None or df_arima is None:
+        print("ERROR: Cannot create prediction plot. Missing required data.")
+        return
+    
+    # Get predictions from both models
+    arima_pred = arima_results.fittedvalues
+    sarima_pred = sarima_results.fittedvalues
+    actual_values = df_arima['GHI'].values
+    
+    # Create figure with two subplots
+    fig, axes = plt.subplots(1, 2, figsize=(16, 7))
+    
+    # Plot 1: ARIMA - Actual vs Prediction (Scatter Plot)
+    ax1 = axes[0]
+    ax1.scatter(actual_values, arima_pred, alpha=0.4, s=20, color='#1f77b4', edgecolor='none', label='Predictions')
+    
+    # Add perfect prediction line (y=x)
+    min_val = min(actual_values.min(), arima_pred.min())
+    max_val = max(actual_values.max(), arima_pred.max())
+    ax1.plot([min_val, max_val], [min_val, max_val], 'r--', linewidth=2, label='Perfect Prediction (y=x)')
+    
+    ax1.set_xlabel('Actual GHI (W/m²)', fontsize=12, fontweight='bold')
+    ax1.set_ylabel('Predicted GHI (W/m²)', fontsize=12, fontweight='bold')
+    ax1.set_title('ARIMA: Actual vs Prediction', fontsize=13, fontweight='bold', pad=15)
+    ax1.legend(fontsize=11, loc='upper left')
+    ax1.grid(True, alpha=0.3)
+    
+    # Calculate and display metrics
+    arima_mape = np.mean(np.abs((actual_values - arima_pred) / actual_values)) * 100
+    arima_mae = np.mean(np.abs(actual_values - arima_pred))
+    ax1.text(0.98, 0.02, f'MAPE: {arima_mape:.2f}%\nMAE: {arima_mae:.2f}', 
+             transform=ax1.transAxes, fontsize=10, verticalalignment='bottom', 
+             horizontalalignment='right', bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.8))
+    
+    # Plot 2: SARIMA - Actual vs Prediction (Scatter Plot)
+    ax2 = axes[1]
+    ax2.scatter(actual_values, sarima_pred, alpha=0.4, s=20, color='#ff7f0e', edgecolor='none', label='Predictions')
+    
+    # Add perfect prediction line (y=x)
+    ax2.plot([min_val, max_val], [min_val, max_val], 'r--', linewidth=2, label='Perfect Prediction (y=x)')
+    
+    ax2.set_xlabel('Actual GHI (W/m²)', fontsize=12, fontweight='bold')
+    ax2.set_ylabel('Predicted GHI (W/m²)', fontsize=12, fontweight='bold')
+    ax2.set_title('SARIMA: Actual vs Prediction', fontsize=13, fontweight='bold', pad=15)
+    ax2.legend(fontsize=11, loc='upper left')
+    ax2.grid(True, alpha=0.3)
+    
+    # Calculate and display metrics
+    sarima_mape = np.mean(np.abs((actual_values - sarima_pred) / actual_values)) * 100
+    sarima_mae = np.mean(np.abs(actual_values - sarima_pred))
+    ax2.text(0.98, 0.02, f'MAPE: {sarima_mape:.2f}%\nMAE: {sarima_mae:.2f}', 
+             transform=ax2.transAxes, fontsize=10, verticalalignment='bottom', 
+             horizontalalignment='right', bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.8))
+    
+    plt.suptitle('Actual Data vs Model Predictions (Scatter Plot)', fontsize=15, fontweight='bold', y=0.98)
+    plt.tight_layout()
+    plt.savefig(save_path, dpi=300, bbox_inches='tight')
+    plt.show()
+    
+    print(f"\nActual vs Prediction scatter plot saved to: {save_path}")
+    
+    # Print summary statistics
+    print("\n" + "="*80)
+    print("PREDICTION ACCURACY METRICS")
+    print("="*80)
+    print("\nARIMA Model:")
+    print(f"  MAPE (Mean Absolute Percentage Error): {arima_mape:.2f}%")
+    print(f"  MAE (Mean Absolute Error): {arima_mae:.2f} W/m²")
+    print(f"  Correlation (Actual vs Prediction): {np.corrcoef(actual_values, arima_pred)[0, 1]:.4f}")
+    
+    print("\nSARIMA Model:")
+    print(f"  MAPE (Mean Absolute Percentage Error): {sarima_mape:.2f}%")
+    print(f"  MAE (Mean Absolute Error): {sarima_mae:.2f} W/m²")
+    print(f"  Correlation (Actual vs Prediction): {np.corrcoef(actual_values, sarima_pred)[0, 1]:.4f}")
+    
+    print("\n" + "-"*80)
+    if arima_mape < sarima_mape:
+        print(f"✓ ARIMA has lower MAPE ({arima_mape:.2f}% vs {sarima_mape:.2f}%)")
+    else:
+        print(f"✓ SARIMA has lower MAPE ({sarima_mape:.2f}% vs {arima_mape:.2f}%)")
+    
+    print("="*80 + "\n")
+
+def plot_residuals(arima_results, sarima_results, save_path='./resultpngs/residuals_plot.png'):
+    """
+    Create residual plots for ARIMA and SARIMA models.
+    
+    Parameters:
+    -----------
+    arima_results : ARIMA fit results
+        Fitted ARIMA model results
+    sarima_results : SARIMAX fit results
+        Fitted SARIMA model results
+    save_path : str
+        Path to save the residuals plot
+    """
+    
+    if arima_results is None or sarima_results is None:
+        print("ERROR: Cannot create residuals plot. One or both models are None.")
+        return
+    
+    # Get residuals
+    arima_resid = arima_results.resid
+    sarima_resid = sarima_results.resid
+    
+    # Create figure with 4 subplots (2x2)
+    fig, axes = plt.subplots(2, 2, figsize=(16, 10))
+    
+    # Plot 1: ARIMA Residuals Over Time
+    ax1 = axes[0, 0]
+    ax1.plot(arima_resid.index, arima_resid.values, label='ARIMA Residuals', color='#1f77b4', linewidth=0.8, alpha=0.8)
+    ax1.axhline(y=0, color='red', linestyle='--', linewidth=2)
+    ax1.fill_between(arima_resid.index, arima_resid.values, alpha=0.3, color='#1f77b4')
+    ax1.set_ylabel('Residuals (W/m²)', fontsize=11, fontweight='bold')
+    ax1.set_xlabel('Time Index', fontsize=11, fontweight='bold')
+    ax1.set_title('ARIMA: Residuals Over Time', fontsize=12, fontweight='bold')
+    ax1.legend(fontsize=10)
+    ax1.grid(True, alpha=0.3)
+    
+    # Plot 2: SARIMA Residuals Over Time
+    ax2 = axes[0, 1]
+    ax2.plot(sarima_resid.index, sarima_resid.values, label='SARIMA Residuals', color='#ff7f0e', linewidth=0.8, alpha=0.8)
+    ax2.axhline(y=0, color='red', linestyle='--', linewidth=2)
+    ax2.fill_between(sarima_resid.index, sarima_resid.values, alpha=0.3, color='#ff7f0e')
+    ax2.set_ylabel('Residuals (W/m²)', fontsize=11, fontweight='bold')
+    ax2.set_xlabel('Time Index', fontsize=11, fontweight='bold')
+    ax2.set_title('SARIMA: Residuals Over Time', fontsize=12, fontweight='bold')
+    ax2.legend(fontsize=10)
+    ax2.grid(True, alpha=0.3)
+    
+    # Plot 3: ARIMA Residuals Histogram
+    ax3 = axes[1, 0]
+    ax3.hist(arima_resid.values, bins=50, color='#1f77b4', edgecolor='black', alpha=0.7, label='ARIMA Residuals')
+    ax3.axvline(x=0, color='red', linestyle='--', linewidth=2, label='Mean=0')
+    ax3.axvline(x=arima_resid.mean(), color='green', linestyle='--', linewidth=2, label=f'Actual Mean={arima_resid.mean():.2f}')
+    ax3.set_xlabel('Residual Value (W/m²)', fontsize=11, fontweight='bold')
+    ax3.set_ylabel('Frequency', fontsize=11, fontweight='bold')
+    ax3.set_title('ARIMA: Residuals Distribution', fontsize=12, fontweight='bold')
+    ax3.legend(fontsize=9)
+    ax3.grid(True, alpha=0.3, axis='y')
+    
+    # Plot 4: SARIMA Residuals Histogram
+    ax4 = axes[1, 1]
+    ax4.hist(sarima_resid.values, bins=50, color='#ff7f0e', edgecolor='black', alpha=0.7, label='SARIMA Residuals')
+    ax4.axvline(x=0, color='red', linestyle='--', linewidth=2, label='Mean=0')
+    ax4.axvline(x=sarima_resid.mean(), color='green', linestyle='--', linewidth=2, label=f'Actual Mean={sarima_resid.mean():.2f}')
+    ax4.set_xlabel('Residual Value (W/m²)', fontsize=11, fontweight='bold')
+    ax4.set_ylabel('Frequency', fontsize=11, fontweight='bold')
+    ax4.set_title('SARIMA: Residuals Distribution', fontsize=12, fontweight='bold')
+    ax4.legend(fontsize=9)
+    ax4.grid(True, alpha=0.3, axis='y')
+    
+    plt.suptitle('Residual Analysis: ARIMA vs SARIMA', fontsize=15, fontweight='bold', y=0.995)
+    plt.tight_layout()
+    plt.savefig(save_path, dpi=300, bbox_inches='tight')
+    plt.show()
+    
+    print(f"\nResiduals plot saved to: {save_path}")
+    
+    # Print residual statistics
+    print("\n" + "="*80)
+    print("RESIDUAL ANALYSIS")
+    print("="*80)
+    
+    print("\nARIMA Model Residuals:")
+    print(f"  Mean: {arima_resid.mean():.4f}")
+    print(f"  Std Dev: {arima_resid.std():.4f}")
+    print(f"  Min: {arima_resid.min():.4f}")
+    print(f"  Max: {arima_resid.max():.4f}")
+    print(f"  Sum of Squares: {(arima_resid**2).sum():.4f}")
+    
+    print("\nSARIMA Model Residuals:")
+    print(f"  Mean: {sarima_resid.mean():.4f}")
+    print(f"  Std Dev: {sarima_resid.std():.4f}")
+    print(f"  Min: {sarima_resid.min():.4f}")
+    print(f"  Max: {sarima_resid.max():.4f}")
+    print(f"  Sum of Squares: {(sarima_resid**2).sum():.4f}")
+    
+    print("\n" + "-"*80)
+    print("Analysis:")
+    if arima_resid.std() < sarima_resid.std():
+        print(f"✓ ARIMA has lower residual std dev ({arima_resid.std():.4f} vs {sarima_resid.std():.4f})")
+    else:
+        print(f"✓ SARIMA has lower residual std dev ({sarima_resid.std():.4f} vs {arima_resid.std():.4f})")
+    
+    arima_sse = (arima_resid**2).sum()
+    sarima_sse = (sarima_resid**2).sum()
+    if arima_sse < sarima_sse:
+        print(f"✓ ARIMA has lower sum of squared errors ({arima_sse:.2f} vs {sarima_sse:.2f})")
+    else:
+        print(f"✓ SARIMA has lower sum of squared errors ({sarima_sse:.2f} vs {arima_sse:.2f})")
+    
+    print("="*80 + "\n")
+
+def plot_detailed_comparison(arima_results, sarima_results, df_arima, save_path='./resultpngs/detailed_comparison.png'):
+    """
+    Create a detailed 4-panel comparison plot for ARIMA vs SARIMA models.
+    
+    Parameters:
+    -----------
+    arima_results : ARIMA fit results
+        Fitted ARIMA model results
+    sarima_results : SARIMAX fit results
+        Fitted SARIMA model results
+    df_arima : pd.DataFrame
+        Original dataframe with actual values
+    save_path : str
+        Path to save the detailed comparison plot
+    """
+    
+    if arima_results is None or sarima_results is None or df_arima is None:
+        print("ERROR: Cannot create detailed comparison plot. Missing required data.")
+        return
+    
+    # Get predictions and actual values
+    arima_pred = arima_results.fittedvalues
+    sarima_pred = sarima_results.fittedvalues
+    actual_values = df_arima['GHI'].values
+    
+    # Calculate metrics
+    arima_rmse = np.sqrt(arima_results.mse)
+    sarima_rmse = np.sqrt(sarima_results.mse)
+    arima_mae = np.mean(np.abs(actual_values - arima_pred))
+    sarima_mae = np.mean(np.abs(actual_values - sarima_pred))
+    
+    # Create figure
+    fig = plt.figure(figsize=(16, 12))
+    gs = fig.add_gridspec(2, 2, hspace=0.3, wspace=0.3)
+    
+    # Plot 1: RMSE Comparison (Bar Chart)
+    ax1 = fig.add_subplot(gs[0, 0])
+    models = ['ARIMA', 'SARIMA']
+    rmse_values = [arima_rmse, sarima_rmse]
+    colors = ['#1f77b4', '#ff7f0e']
+    bars1 = ax1.bar(models, rmse_values, color=colors, alpha=0.8, edgecolor='black', linewidth=1.5)
+    
+    # Add value labels on bars
+    for bar, val in zip(bars1, rmse_values):
+        height = bar.get_height()
+        ax1.text(bar.get_x() + bar.get_width()/2., height,
+                f'{val:.4f}',
+                ha='center', va='bottom', fontsize=11, fontweight='bold')
+    
+    ax1.set_ylabel('RMSE (W/m²)', fontsize=12, fontweight='bold')
+    ax1.set_title('RMSE Comparison', fontsize=13, fontweight='bold')
+    ax1.grid(axis='y', alpha=0.3)
+    
+    # Plot 2: MAE Comparison (Bar Chart)
+    ax2 = fig.add_subplot(gs[0, 1])
+    mae_values = [arima_mae, sarima_mae]
+    bars2 = ax2.bar(models, mae_values, color=colors, alpha=0.8, edgecolor='black', linewidth=1.5)
+    
+    # Add value labels on bars
+    for bar, val in zip(bars2, mae_values):
+        height = bar.get_height()
+        ax2.text(bar.get_x() + bar.get_width()/2., height,
+                f'{val:.4f}',
+                ha='center', va='bottom', fontsize=11, fontweight='bold')
+    
+    ax2.set_ylabel('MAE (W/m²)', fontsize=12, fontweight='bold')
+    ax2.set_title('MAE Comparison', fontsize=13, fontweight='bold')
+    ax2.grid(axis='y', alpha=0.3)
+    
+    # Plot 3: Predictions vs Actual (Line Plot - First 300 Points)
+    ax3 = fig.add_subplot(gs[1, 0])
+    n_points = min(300, len(actual_values))
+    x_points = np.arange(n_points)
+    
+    ax3.plot(x_points, actual_values[:n_points], label='Actual', color='blue', linewidth=2, marker='o', markersize=3, alpha=0.7)
+    ax3.plot(x_points, arima_pred[:n_points], label='ARIMA', color='#1f77b4', linewidth=1.5, linestyle='--', alpha=0.7)
+    ax3.plot(x_points, sarima_pred[:n_points], label='SARIMA', color='#ff7f0e', linewidth=1.5, linestyle='--', alpha=0.7)
+    
+    ax3.set_xlabel('Time Index (First 300 Points)', fontsize=11, fontweight='bold')
+    ax3.set_ylabel('GHI (W/m²)', fontsize=11, fontweight='bold')
+    ax3.set_title('Predictions vs Actual Values', fontsize=13, fontweight='bold')
+    ax3.legend(fontsize=10, loc='upper left')
+    ax3.grid(True, alpha=0.3)
+    
+    # Plot 4: Summary Box with Key Metrics
+    ax4 = fig.add_subplot(gs[1, 1])
+    ax4.axis('off')
+    
+    # Calculate correlations
+    arima_corr = np.corrcoef(actual_values, arima_pred)[0, 1]
+    sarima_corr = np.corrcoef(actual_values, sarima_pred)[0, 1]
+    
+    # Determine best model
+    best_rmse = 'ARIMA' if arima_rmse < sarima_rmse else 'SARIMA'
+    best_mae = 'ARIMA' if arima_mae < sarima_mae else 'SARIMA'
+    best_corr = 'ARIMA' if arima_corr > sarima_corr else 'SARIMA'
+    
+    summary_text = f"""SUMMARY - BEST MODELS BY METRIC
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+RMSE (Root Mean Squared Error)
+  Best: {best_rmse}
+  ARIMA:  {arima_rmse:.4f}
+  SARIMA: {sarima_rmse:.4f}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+MAE (Mean Absolute Error)
+  Best: {best_mae}
+  ARIMA:  {arima_mae:.4f}
+  SARIMA: {sarima_mae:.4f}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Correlation (Actual vs Prediction)
+  Best: {best_corr}
+  ARIMA:  {arima_corr:.4f}
+  SARIMA: {sarima_corr:.4f}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Overall Data Points: {len(actual_values):,}
+"""
+    
+    ax4.text(0.1, 0.95, summary_text, transform=ax4.transAxes, fontsize=10,
+            verticalalignment='top', fontfamily='monospace',
+            bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.9, pad=1))
+    
+    plt.suptitle('ARIMA vs SARIMA: Comprehensive Comparison', fontsize=16, fontweight='bold', y=0.995)
+    plt.savefig(save_path, dpi=300, bbox_inches='tight')
+    plt.show()
+    
+    print(f"\nDetailed comparison plot saved to: {save_path}")
+
+def main():
+    """Main function to execute solar data analysis workflow."""
+    
+    # Step 1: Load data
+    df = load_data('../solar2022.csv')
+    
+    # Step 2: Preprocess data
+    df = preprocess_data(df)
+    
+    # Step 3: Filter GHI data (remove rows where GHI < 5)
+    df = filter_ghi_data(df, threshold=5)
+    
+    # Step 4: Add season column based on month
+    df = add_season_column(df)
+    
+    # Step 5: Plot time-series with seasonality
+    plot_timeseries_with_seasonality(df)
+    
+    # Step 6: Plot GHI distribution by season
+    #plot_ghi_distribution_by_season(df)
+    
+    # Step 7: Plot GHI box plot by season
+    #plot_ghi_boxplot_by_season(df)
+    
+    # Step 8: Plot Temperature vs GHI and explain relationship
+    #plot_temperature_vs_ghi(df)
+    
+    #print(df[['DateTime', 'GHI', 'Month', 'Season']].head(25))
+
+    # Step 9: Plot overall GHI distribution
+    #plot_ghi_distribution(df)
+    
+    # Step 10: Create correlation heatmap
+    #create_correlation_heatmap(df)
+    
+    # Step 11: Normalize data (commented out)
+    # df = normalize_data(df)
+    
+    # Step 12: Perform stationarity tests (commented out)
+    print("\nSTATIONARITY TESTS")
+    print("="*80)
+    adf_results = []
+    for col in ['GHI']:
+        adf_results.append(perform_adf_test(df[col], col))
+    print("\n" + "="*80)
+    print("\nSUMMARY COMPARISON:")
+    summary_df = pd.DataFrame(adf_results)
+    print(summary_df.to_string(index=False))
+    
+    # Step 13: Create ARIMA training dataframe with DateTime, Temperature, and GHI
+    df_arima = create_arima_dataframe(df)
+    
+    # Step 14: Train ARIMA model on GHI
+    if df_arima is not None:
+        arima_model, arima_results = train_arima_model(df_arima, order=(1, 0, 0), target_col='GHI')
+        
+        # Step 15: Train SARIMA model on GHI
+        sarima_model, sarima_results = train_sarima_model(df_arima, 
+                                                          order=(1, 0, 0), 
+                                                          seasonal_order=(1, 0, 1, 9), 
+                                                          target_col='GHI')
+        
+        # Step 16: Compare ARIMA and SARIMA
+        if arima_results is not None and sarima_results is not None:
+            compare_arima_sarima(arima_results, sarima_results)
+            
+            # Step 17: Plot actual vs prediction scatter plots
+            plot_actual_vs_prediction(arima_results, sarima_results, df_arima)
+            
+            # Step 18: Plot residuals for both models
+            plot_residuals(arima_results, sarima_results)
+            
+            # Step 19: Create detailed comparison plot
+            plot_detailed_comparison(arima_results, sarima_results, df_arima)
+    else:
+        print("ERROR: Failed to create ARIMA dataframe. Cannot train models.")
+
+
+
+
+if __name__ == "__main__":
+    main()
+
+
