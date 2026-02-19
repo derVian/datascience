@@ -485,8 +485,7 @@ def train_arima_model(df_arima, order=(1, 0, 0), target_col='GHI', test_size=0.2
     
     # Train ARIMA model on training set
     try:
-        # Use improved ARIMA order (2,1,1) instead of simple (1,0,0)
-        arima_model = ARIMA(train_data, order=(2, 1, 1))
+        arima_model = ARIMA(train_data, order=order)
         arima_results = arima_model.fit()
         
         # Make predictions on test set
@@ -519,8 +518,8 @@ def train_arima_model(df_arima, order=(1, 0, 0), target_col='GHI', test_size=0.2
 
 def train_sarima_model(
     df_arima,
-    order=(1, 0, 1),
-    seasonal_order=(1, 0, 1, 9),
+    order,
+    seasonal_order,
     target_col='GHI',
     test_size=0.2,
 ):
@@ -532,9 +531,9 @@ def train_sarima_model(
     df_arima : pd.DataFrame
         Dataframe with DateTime and target column
     order : tuple
-        ARIMA order (p, d, q) - defaults to (1, 0, 1)
+        ARIMA order (p, d, q)
     seasonal_order : tuple
-        Seasonal order (P, D, Q, s) - defaults to (1, 0, 1, 9) for 9 samples/day
+        Seasonal order (P, D, Q, s) for 9 samples/day
     target_col : str
         Name of the column to forecast (default: 'GHI')
     test_size : float
@@ -548,6 +547,8 @@ def train_sarima_model(
     """
     
     if df_arima is None or len(df_arima) == 0:
+        return None, None, None
+    if order is None or seasonal_order is None:
         return None, None, None
     
     # Split data into train and test sets
@@ -597,8 +598,8 @@ def train_sarima_model(
 
 def train_sarimax_model(
     df_arima,
-    order=(1, 0, 1),
-    seasonal_order=(1, 0, 1, 9),
+    order,
+    seasonal_order,
     target_col='GHI',
     exog_cols=None,
     test_size=0.2,
@@ -611,9 +612,9 @@ def train_sarimax_model(
     df_arima : pd.DataFrame
         Dataframe with DateTime, target, and exogenous columns
     order : tuple
-        ARIMA order (p, d, q) - defaults to (1, 0, 1)
+        ARIMA order (p, d, q)
     seasonal_order : tuple
-        Seasonal order (P, D, Q, s) - defaults to (1, 0, 1, 9) for 9 samples/day
+        Seasonal order (P, D, Q, s) for 9 samples/day
     target_col : str
         Name of the column to forecast (default: 'GHI')
     exog_cols : list[str] | None
@@ -629,6 +630,8 @@ def train_sarimax_model(
     """
 
     if df_arima is None or len(df_arima) == 0:
+        return None, None, None
+    if order is None or seasonal_order is None:
         return None, None, None
 
     if exog_cols is None:
@@ -972,37 +975,37 @@ def main():
     df = filter_ghi_data(df, threshold=5)
     
     # Step 4: Add season column based on month
-    # df = add_season_column(df)
+    df = add_season_column(df)
     
     # # Step 5: Plot time-series with seasonality
-    # plot_timeseries_with_seasonality(df)
+    plot_timeseries_with_seasonality(df)
     
     # # Step 6: Plot GHI distribution by season
-    # plot_ghi_distribution_by_season(df)
+    plot_ghi_distribution_by_season(df)
     
     # # Step 7: Plot GHI box plot by season
-    # plot_ghi_boxplot_by_season(df)
+    plot_ghi_boxplot_by_season(df)
     
     # # Step 8: Plot Temperature vs GHI and explain relationship
-    # plot_temperature_vs_ghi(df)
+    plot_temperature_vs_ghi(df)
     
     # #print(df[['DateTime', 'GHI', 'Month', 'Season']].head(25))
 
     # # Step 9: Plot overall GHI distribution
-    # plot_ghi_distribution(df)
+    plot_ghi_distribution(df)
     
     # # Step 10: Create correlation heatmap
-    # create_correlation_heatmap(df)
+    create_correlation_heatmap(df)
    
-    # print("\nSTATIONARITY TESTS")
-    # print("="*80)
-    # adf_results = []
-    # for col in ['GHI']:
-    #     adf_results.append(perform_adf_test(df[col], col))
-    # print("\n" + "="*80)
-    # print("\nSUMMARY COMPARISON:")
-    # summary_df = pd.DataFrame(adf_results)
-    # print(summary_df.to_string(index=False))
+    print("\nSTATIONARITY TESTS")
+    print("="*80)
+    adf_results = []
+    for col in ['GHI']:
+        adf_results.append(perform_adf_test(df[col], col))
+    print("\n" + "="*80)
+    print("\nSUMMARY COMPARISON:")
+    summary_df = pd.DataFrame(adf_results)
+    print(summary_df.to_string(index=False))
   
     
 
@@ -1022,41 +1025,41 @@ def main():
     summary_df = pd.DataFrame(adf_results)
     print(summary_df.to_string(index=False))
     # print(df_arima.head())
-    # # Step 14: Train ARIMA model on GHI
-    # if df_arima is not None:
-    #     arima_model, arima_results, arima_metrics = train_arima_model(df_arima, order=(3, 0, 3 ), target_col='GHI_MinMax')
+    # Step 14: Train ARIMA model on GHI
+    if df_arima is not None:
+        arima_model, arima_results, arima_metrics = train_arima_model(df_arima, order=(3, 0, 3 ), target_col='GHI_MinMax')
         
-    #     # Step 15: Train SARIMA model on GHI
-    #     sarima_model, sarima_results, sarima_metrics = train_sarima_model(
-    #         df_arima,
-    #         order=(3, 0, 3),
-    #         seasonal_order=(3, 0, 3, 9),
-    #         target_col='GHI_MinMax',
-    #     )
+        # Step 15: Train SARIMA model on GHI
+        sarima_model, sarima_results, sarima_metrics = train_sarima_model(
+            df_arima,
+            order=(3, 0, 3),
+            seasonal_order=(3, 0, 3, 9),
+            target_col='GHI_MinMax',
+        )
 
-    #     # Step 16: Train SARIMAX model on GHI with Temperature as exogenous
-    #     sarimax_model, sarimax_results, sarimax_metrics = train_sarimax_model(
-    #         df_arima,
-    #         order=(3, 0, 3),
-    #         seasonal_order=(3, 0, 3, 9),
-    #         target_col='GHI_MinMax',
-    #         exog_cols=['Temperature'],
-    #     )
+        # Step 16: Train SARIMAX model on GHI with Temperature as exogenous
+        sarimax_model, sarimax_results, sarimax_metrics = train_sarimax_model(
+            df_arima,
+            order=(3, 0, 3),
+            seasonal_order=(3, 0, 3, 9),
+            target_col='GHI_MinMax',
+            exog_cols=['Temperature'],
+        )
         
-    #     # Step 17: Compare ARIMA, SARIMA, and SARIMAX
-    #     if arima_metrics is not None and sarima_metrics is not None:
-    #         compare_arima_sarima(arima_metrics, sarima_metrics, sarimax_metrics)
+        # Step 17: Compare ARIMA, SARIMA, and SARIMAX
+        if arima_metrics is not None and sarima_metrics is not None:
+            compare_arima_sarima(arima_metrics, sarima_metrics, sarimax_metrics)
             
-    #         # Step 18: Plot actual vs prediction scatter plots
-    #         plot_actual_vs_prediction(arima_metrics, sarima_metrics, sarimax_metrics)
+            # Step 18: Plot actual vs prediction scatter plots
+            plot_actual_vs_prediction(arima_metrics, sarima_metrics, sarimax_metrics)
             
-    #         # Step 19: Plot residuals for both models
-    #         plot_residuals(arima_metrics, sarima_metrics, sarimax_metrics)
+            # Step 19: Plot residuals for both models
+            plot_residuals(arima_metrics, sarima_metrics, sarimax_metrics)
             
-    #         # Step 20: Create detailed comparison plot
-    #         plot_detailed_comparison(arima_metrics, sarima_metrics, sarimax_metrics)
-    # else:
-    #     print("ERROR: Failed to create ARIMA dataframe. Cannot train models.")
+            # Step 20: Create detailed comparison plot
+            plot_detailed_comparison(arima_metrics, sarima_metrics, sarimax_metrics)
+    else:
+        print("ERROR: Failed to create ARIMA dataframe. Cannot train models.")
 
 
 
